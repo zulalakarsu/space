@@ -46,7 +46,7 @@
 
 ## Example Workflow
 
-1. **Astronaut Command:** "Analyze the heart."
+1. **Astronaut Command:** "Heart."
 2. **Image Capture:** An ultrasound image is taken and fed into the segmentation model.
 3. **Segmentation Outcome:**
    - **If the Heart is Visible:**  
