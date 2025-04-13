@@ -7,12 +7,9 @@ import base64
 from typing import Optional
 import io
 from PIL import Image
-import uvicorn
 import os
-import requests
-import json
 from openai import OpenAI
-
+from src.prompts import get_navigation_prompt, get_ultrasound_diagnostic_prompt
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
@@ -66,12 +63,6 @@ def identify_entity_in_image(image, entity_name):
     image_pil.save(buffer, format="JPEG")
     base64_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
     
-    # Prepare the API request to OpenAI
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {OPENAI_API_KEY}"
-    }
-    
     # Using GPT-4 Vision API for identification
     payload = {
         "model": "gpt-4o",  # or the latest vision model
@@ -95,26 +86,14 @@ def identify_entity_in_image(image, entity_name):
         "max_tokens": 10  # Keep response concise
     }
 
-    
     try:
-        response = openai_client.completions.create(**payload)
-        # response = requests.post(
-        #     "https://api.openai.com/v1/chat/completions",
-        #     headers=headers,
-        #     json=payload
-        # )
-        
-        # Check if the request was successful
-        # response.raise_for_status()
-        
-        # Parse the response
-        # result = response.json()
+        response = openai_client.chat.completions.create(**payload)
         response_text = response.choices[0].message.content
         
         # Determine if the entity was found based on the response
-        if "true" in response_text:
+        if "true" in response_text.lower():
             return True
-        elif "false" in response_text:
+        elif "false" in response_text.lower():
             return False
         else:
             # If response is unclear, default to False
@@ -144,12 +123,6 @@ def generate_description(image):
     image_pil.save(buffer, format="JPEG")
     base64_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
     
-    # Prepare the API request to OpenAI
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {OPENAI_API_KEY}"
-    }
-    
     # Using GPT-4 Vision API for image description
     payload = {
         "model": "gpt-4o",  # or the latest vision model
@@ -159,7 +132,7 @@ def generate_description(image):
                 "content": [
                     {
                         "type": "text",
-                        "text": "Describe this image in detail. Include information about objects, people, activities, setting, colors, and any notable elements."
+                        "text": get_ultrasound_diagnostic_prompt()
                     },
                     {
                         "type": "image_url",
@@ -174,7 +147,7 @@ def generate_description(image):
     }
     
     try:
-        response = openai_client.completions.create(**payload)
+        response = openai_client.chat.completions.create(**payload)
         description = response.choices[0].message.content
         return description
             
@@ -246,46 +219,70 @@ async def identify_image_base64(request: IdentifyImageRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Endpoint 2: Navigate
+# Endpoint 2: Navigate - FIXED to correctly handle image UploadFile
 @app.post("/navigate", response_class=JSONResponse)
-async def navigate(request: NavigateRequest):
+async def navigate(entity_name: str = Form(...), image: UploadFile = File(...)):
     """
-    Process text input and respond with navigation instructions.
+    Process image and provide navigation instructions to locate a specific entity.
     
     Parameters:
-    - request (NavigateRequest): Contains text input for navigation
+    - entity_name (str): The name of the entity to navigate to
+    - image (File): The uploaded image file
     
     Returns:
     - JSON with navigation response
     """
     try:
+        # Read image file
+        content = await image.read()
+        nparr = np.frombuffer(content, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if img is None:
+            raise HTTPException(status_code=400, detail="Invalid image format")
+        
+        # Convert OpenCV image to base64 for API request
+        image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        image_pil = Image.fromarray(image_rgb)
+        
+        buffer = io.BytesIO()
+        image_pil.save(buffer, format="JPEG")
+        base64_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        
         # This would typically connect to a navigation service or NLP model
-        # For demonstration, we'll return a simple response based on keywords
+        payload = {
+            "model": "gpt-4o",  # or the latest vision model
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": get_navigation_prompt(entity_name)
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "max_tokens": 4096  # Adjust based on desired description length
+        }
         
-        input_text = request.text.lower()
+        response = openai_client.chat.completions.create(**payload)
         
-        # Simplified keyword-based response generation
-        if "left" in input_text:
-            response = "Navigating to the left"
-        elif "right" in input_text:
-            response = "Navigating to the right"
-        elif "forward" in input_text or "ahead" in input_text:
-            response = "Moving forward"
-        elif "back" in input_text or "behind" in input_text:
-            response = "Moving backward"
-        elif "stop" in input_text:
-            response = "Stopping navigation"
-        else:
-            response = "I didn't understand the navigation command. Please try again with directions like 'left', 'right', 'forward', 'back', or 'stop'."
-        
-        return {"response": response, "original_text": request.text}
+        return {"response": response.choices[0].message.content}
     
     except Exception as e:
+        print(f"Error in navigate endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Endpoint 3: Describe
 @app.post("/describe", response_class=JSONResponse)
-async def describe_image(image: UploadFile = File(...)):
+async def describe_image(target_organ: str = Form(...), image: UploadFile = File(...)):
     """
     Generate a description of an uploaded image.
     
@@ -304,43 +301,46 @@ async def describe_image(image: UploadFile = File(...)):
         if img is None:
             raise HTTPException(status_code=400, detail="Invalid image format")
         
-        # Generate image description
-        description = generate_description(img)
+        # Convert OpenCV image to base64 for API request
+        image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        image_pil = Image.fromarray(image_rgb)
         
-        return {"description": description}
+        buffer = io.BytesIO()
+        image_pil.save(buffer, format="JPEG")
+        base64_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        
+        # This would typically connect to a navigation service or NLP model
+        payload = {
+            "model": "gpt-4o",  # or the latest vision model
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": get_ultrasound_diagnostic_prompt(target_organ)
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "max_tokens": 4096  # Adjust based on desired description length
+        }
+        
+        response = openai_client.chat.completions.create(**payload)
+        print(response.choices[0].message.content)
+        
+        return {"description": response.choices[0].message.content}
     
     except Exception as e:
+        print(f"Error in describe endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Endpoint 3 Alternative: Describe with base64
-@app.post("/describe_base64", response_class=JSONResponse)
-async def describe_image_base64(image_data: dict):
-    """
-    Generate a description of a base64-encoded image.
-    
-    Parameters:
-    - image_data (dict): Contains base64-encoded image in 'image' field
-    
-    Returns:
-    - JSON with image description
-    """
-    try:
-        if 'image' not in image_data:
-            raise HTTPException(status_code=400, detail="Image data is required")
-        
-        # Decode base64 image
-        img = decode_image(image_data['image'])
-        
-        if img is None:
-            raise HTTPException(status_code=400, detail="Invalid image format")
-        
-        # Generate image description
-        description = generate_description(img)
-        
-        return {"description": description}
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 # Root endpoint for API information
 @app.get("/", response_class=JSONResponse)
@@ -354,9 +354,8 @@ async def root():
         "endpoints": [
             {"path": "/identify", "method": "POST", "description": "Identify entities in images"},
             {"path": "/identify_base64", "method": "POST", "description": "Identify entities in base64-encoded images"},
-            {"path": "/navigate", "method": "POST", "description": "Process navigation text commands"},
-            {"path": "/describe", "method": "POST", "description": "Generate descriptions for images"},
-            {"path": "/describe_base64", "method": "POST", "description": "Generate descriptions for base64-encoded images"}
+            {"path": "/navigate", "method": "POST", "description": "Process navigation for entities in images"},
+            {"path": "/describe", "method": "POST", "description": "Generate descriptions for images"}
         ]
     }
 
