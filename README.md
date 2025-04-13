@@ -41,9 +41,6 @@
    - Optimization of machine settings (depth, gain, frequency).
    - Final confirmation when the correct view is achieved.
 
-## Getting Started
-
-
 ## Example Workflow
 
 1. **Astronaut Command:** "Heart."
@@ -55,3 +52,4 @@
    - **If the Heart is Not Visible:**  
      The system says:  
      "The current image does not show the heart. Please slide the probe upward and adjust the angle slightly toward the chest. Once repositioned, recapture the image."
+## Getting Started
