@@ -28,10 +28,11 @@ if "navigate_response" not in st.session_state:
 if "description_response" not in st.session_state:
     st.session_state.description_response = None
 
+BASE_URL = "https://space-triage-199983032721.us-central1.run.app"
 # API endpoints
-IDENTIFY_API = "http://localhost:8000/identify"
-NAVIGATE_API = "http://localhost:8000/navigate"
-DESCRIBE_API = "http://localhost:8000/describe"
+IDENTIFY_API = f"{BASE_URL}/identify"
+NAVIGATE_API = f"{BASE_URL}/navigate"
+DESCRIBE_API = f"{BASE_URL}/describe"
 
 # Custom functions
 def image_to_bytes(uploaded_image):
