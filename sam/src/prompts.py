@@ -1,6 +1,5 @@
-# prompt_generator.py
 
-def get_llm_transition_prompt():
+def get_navigation_prompt(target_organ):
     """
     Returns the LLM prompt as a multi-line string.
     This prompt guides the LLM to generate a step-by-step voice instruction transcript
@@ -13,7 +12,7 @@ def get_llm_transition_prompt():
         "smoothly transition the ultrasound probe from imaging the current anatomical area to imaging a desired area. "
         "The astronauts work in a microgravity environment, so your instructions must address key challenges such as "
         "securing equipment and maintaining stability.\n\n"
-        
+        "Desired Organ: {target_organ}\n\n"
         "Your instructions should include the following details:\n\n"
         
         "1. Current Image Verification:\n"
@@ -22,7 +21,7 @@ def get_llm_transition_prompt():
         "   - Provide a brief pause for the astronaut to verify and understand the current setup.\n\n"
         
         "2. Preparing for the Transition:\n"
-        "   - Instruct how to maintain contact with the patient’s skin and prepare to move the probe.\n"
+        "   - Instruct how to maintain contact with the patient's skin and prepare to move the probe.\n"
         "   - Instruct how to position the patient and what direction to give to the patient.\n\n"
         
         "3. Probe Movement:\n"
@@ -42,13 +41,48 @@ def get_llm_transition_prompt():
         
         "The tone of the instructions should be calm, confident, and clear, using non-technical language whenever possible. "
         "The output must be a transcript that can be read aloud, with each step clearly separated. The transcript should "
-        "include occasional reflective questions to confirm the astronaut’s understanding.\n\n"
+        "include occasional reflective questions to confirm the astronaut's understanding.\n\n"
         
         "Now, generate the complete voice instruction transcript based on these guidelines."
     )
-    return prompt
+    return prompt.format(target_organ=target_organ)
 
-if __name__ == "__main__":
-    prompt_text = get_llm_transition_prompt()
-    print("LLM Prompt for Astronaut Ultrasound Instructions:\n")
-    print(prompt_text)
+
+def get_ultrasound_diagnostic_prompt(target_organ):
+    """
+    Returns the LLM prompt as a multi-line string.
+    This prompt directs a voice agent to review an ultrasound image provided by an astronaut.
+    The voice agent should evaluate image quality, comment on the viewable area, and offer an initial diagnostic assessment.
+    """
+    prompt = """
+    You are an agent reviewing an ultrasound scan sent by an astronaut. Your task is to provide a clear and supportive written transcript focused on evaluating the organ shown in the image.
+
+    The target organ appears to be {target_organ}.
+
+    Your response should include the following sections:
+
+    1. Observations of the Organ:
+
+    Briefly describe the organ's overall appearance—shape, size, and texture.
+
+    Note any visible features like vessels, ducts, chambers, or differences in echogenicity.
+
+    Mention any landmarks that help confirm the organ's identity.
+
+    2. Initial Diagnostic Impression:
+
+    Comment on whether the organ appears normal or if there are signs of concern (e.g., irregular texture, unclear boundaries, fluid presence).
+
+    Suggest if further imaging or clarification might be needed.
+
+    3. Recommendations:
+
+    Offer simple next steps, such as adjusting the probe, changing the angle, or capturing another view.
+
+    Ask a quick follow-up question to confirm understanding or readiness to continue.
+
+    Keep the response concise, medically appropriate, and easy for the astronaut to follow in a high-stress environment. Format the output in plain text.
+    """
+    return prompt.format(target_organ=target_organ)
+
+
