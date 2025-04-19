@@ -6,11 +6,262 @@ import time
 import json
 from typing import List, Dict, Any, Optional
 
+# Configure the page - MUST BE FIRST STREAMLIT COMMAND
+st.set_page_config(
+    page_title="Space Triage: AI-Guided Ultrasound",
+    page_icon="🚀",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
 # Define API endpoints
 BASE_URL = "https://space-triage-199983032721.us-central1.run.app"
 IDENTIFY_API = f"{BASE_URL}/identify"
 NAVIGATE_API = f"{BASE_URL}/navigate"
 DESCRIBE_API = f"{BASE_URL}/describe"
+
+# Add CSS for the days label
+st.markdown("""
+    <style>
+    .health-chain-container {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        margin: 10px 0;
+    }
+    
+    .days-label {
+        color: white;
+        font-size: 14px;
+        font-weight: 500;
+        text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+        min-width: 45px;
+    }
+    
+    .health-chain {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+        background: rgba(0, 0, 0, 0.3);
+        padding: 15px;
+        border-radius: 20px;
+        justify-content: flex-start;
+        overflow-x: auto;
+        min-height: 50px;
+        flex-grow: 1;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+def display_health_history(organ_name):
+    """Display a chain of health status for the past 7 days and future days up to 30 days total"""
+    # Mock data - in real app, this would come from your database
+    mock_history = {
+        "Liver": ["green", "yellow", "red", "green", "green", "yellow", "red"],
+        "Kidneys": ["green", "green", "yellow", "green", "green", "green", "green"],
+        "Pancreas": ["yellow", "yellow", "green", "green", "yellow", "green", "green"],
+        "Breasts": ["green", "green", "green", "yellow", "green", "green", "yellow"],
+        "Thyroid": ["yellow", "red", "red", "yellow", "yellow", "yellow", "red"],
+        "Heart": ["green", "green", "yellow", "green", "green", "green", "green"],
+        "Lungs": ["green", "yellow", "green", "green", "green", "yellow", "green"]
+    }
+    
+    # Mock daily reports data
+    if "daily_reports" not in st.session_state:
+        st.session_state.daily_reports = {
+            str(i): {
+                "date": f"2024-03-{i:02d}",
+                "status": "healthy" if i % 3 != 0 else "unhealthy",
+                "notes": "Regular checkup completed" if i % 3 != 0 else "Some concerns noted",
+                "vitals": {
+                    "heart_rate": f"{60 + i}",
+                    "blood_pressure": f"120/{70 + i}",
+                    "temperature": f"{36.5 + i/10:.1f}",
+                },
+                "recommendations": [
+                    "Continue regular monitoring",
+                    "Maintain exercise routine" if i % 3 != 0 else "Schedule follow-up",
+                    "Stay hydrated"
+                ],
+                "alerts": [] if i % 3 != 0 else ["Elevated readings detected"]
+            } for i in range(1, 31)
+        }
+    
+    history = mock_history.get(organ_name, ["green"] * 7)
+    future_days = ["inactive"] * 23
+    all_statuses = history + future_days
+    days = [str(i) for i in range(1, 31)]
+    
+    # Create the chain HTML with the days label - using compact format
+    chain_html = '<div class="health-chain-container"><div class="days-label">Days</div><div class="health-chain">'
+    
+    for i, (day, status) in enumerate(zip(days, all_statuses)):
+        current_class = " current" if i == 6 else ""
+        if status == "inactive":
+            chain_html += f'<div class="health-day health-{status}{current_class}" title="Day {day}: No data" onclick="handleDayClick(\'{day}\')" style="cursor: pointer;">{day}</div>'
+        else:
+            status_text = "Healthy" if status == "green" else "Warning" if status == "yellow" else "Critical"
+            chain_html += f'<div class="health-day health-{status}{current_class}" title="Day {day}: {status_text}" onclick="handleDayClick(\'{day}\')" style="cursor: pointer;">{day}</div>'
+    
+    chain_html += '</div></div>'
+    
+    # Add JavaScript for handling clicks
+    js_code = '<script>function handleDayClick(day) {window.parent.postMessage({type: "streamlit:setComponentValue", value: day}, "*");}</script>'
+    
+    # Render the chain and JavaScript
+    st.markdown(chain_html + js_code, unsafe_allow_html=True)
+    
+    # Handle day selection using session state
+    if "selected_day" not in st.session_state:
+        st.session_state.selected_day = None
+        
+    selected_day = st.query_params.get("selected_day", None)
+    if selected_day:
+        st.session_state.selected_day = selected_day
+        
+    # Show day's dashboard if a day is selected
+    if st.session_state.selected_day and st.session_state.selected_day in st.session_state.daily_reports:
+        report = st.session_state.daily_reports[st.session_state.selected_day]
+        
+        # Create three columns for the dashboard cards
+        col1, col2, col3 = st.columns([1, 1, 1])
+        
+        with col1:
+            # Status Overview Card
+            st.markdown(f"""
+                <div class="organ-card">
+                    <h3>Status Overview</h3>
+                    <p><strong>Latest Check:</strong> {report['date']}</p>
+                    <p><strong>Status:</strong> 
+                        <span class="status-{report['status']}">
+                            {report['status'].upper()}
+                        </span>
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            # Active Alerts
+            alerts_html = """
+                <div class="organ-card">
+                    <h3>⚠️ Active Alerts</h3>
+            """
+            
+            # Add notes if they exist
+            if report['notes']:
+                alerts_html += f'<p class="organ-notes">{report["notes"]}</p>'
+            
+            # Add alerts if they exist
+            if report['alerts']:
+                alerts_html += '<ul class="alert-list">'
+                for alert in report['alerts']:
+                    alerts_html += f'<li class="alert-item">{alert}</li>'
+                alerts_html += '</ul>'
+            elif not report['notes']:  # If no alerts and no notes
+                alerts_html += '<p class="no-alerts">No active alerts</p>'
+            
+            alerts_html += "</div>"
+            st.markdown(alerts_html, unsafe_allow_html=True)
+        
+        with col3:
+            # Recommendations
+            recommendations_html = """
+                <div class="organ-card">
+                    <h3>Recommendations</h3>
+                    <p>Based on your latest assessment:</p>
+                    <ul>
+            """
+            for rec in report.get('recommendations', []):
+                recommendations_html += f"<li>{rec}</li>"
+            recommendations_html += """
+                    </ul>
+                </div>
+            """
+            st.markdown(recommendations_html, unsafe_allow_html=True)
+        
+        # Add a close button
+        if st.button("Close Report", key=f"close_report_{st.session_state.selected_day}"):
+            st.session_state.selected_day = None
+            st.query_params.clear()
+            st.rerun()
+
+# Add CSS for the report summary
+st.markdown("""
+    <style>
+    /* Report Summary Styling */
+    .report-summary {
+        background: rgba(255, 255, 255, 0.95);
+        border-radius: 15px;
+        padding: 2rem;
+        margin: 1rem 0;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+    }
+    
+    .report-header {
+        border-bottom: 1px solid #eee;
+        margin-bottom: 1.5rem;
+        padding-bottom: 1rem;
+    }
+    
+    .report-header h3 {
+        color: #2D3748;
+        margin: 0;
+        font-size: 1.5rem;
+    }
+    
+    .report-date {
+        color: #718096;
+        margin: 0.5rem 0 0 0;
+        font-size: 0.9rem;
+    }
+    
+    .report-section {
+        margin-bottom: 1.5rem;
+    }
+    
+    .report-section h4 {
+        color: #4A5568;
+        margin-bottom: 0.5rem;
+        font-size: 1.1rem;
+    }
+    
+    .report-section ul {
+        list-style-type: none;
+        padding: 0;
+        margin: 0;
+    }
+    
+    .report-section ul li {
+        margin-bottom: 0.5rem;
+        color: #4A5568;
+    }
+    
+    .report-section.alerts {
+        background: rgba(254, 226, 226, 0.5);
+        padding: 1rem;
+        border-radius: 8px;
+        border-left: 4px solid #EF4444;
+    }
+    
+    .report-section.alerts h4 {
+        color: #DC2626;
+    }
+    
+    .report-section.alerts ul li {
+        color: #B91C1C;
+    }
+    
+    .health-day {
+        cursor: pointer;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    
+    .health-day:hover {
+        transform: scale(1.1);
+        box-shadow: 0 0 15px rgba(255, 255, 255, 0.4);
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # Custom functions
 def image_to_bytes(uploaded_image):
@@ -149,14 +400,6 @@ def restart_session():
     st.session_state.target_organ = ""
     st.rerun()
 
-# Configure the page
-st.set_page_config(
-    page_title="Space Triage: AI-Guided Ultrasound",
-    page_icon="🚀",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
-
 # Custom CSS for better styling
 st.markdown("""
     <style id="space-triage-styles">
@@ -208,22 +451,23 @@ st.markdown("""
     
     /* Start button */
     .stButton > button {
-        background-color: #3B82F6;
-        color: white;
-        padding: 1rem 2rem;
-        font-size: 1.2rem;
-        border-radius: 8px;
-        border: none;
-        transition: all 0.3s ease;
-        width: 100%;
-        max-width: 300px;
-        margin: 0 auto;
+        background-color: #3B82F6 !important;
+        color: white !important;
+        border: 1px solid rgba(255, 255, 255, 0.2) !important;
+        padding: 0.5rem 1rem !important;
+        width: 100% !important;
+        border-radius: 8px !important;
+        backdrop-filter: blur(5px) !important;
+        transition: all 0.3s ease !important;
+        font-size: 0.9rem !important;
+        margin-top: 0 !important;
     }
     
     .stButton > button:hover {
-        background-color: #2563EB;
-        transform: translateY(-2px);
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        background-color: #2563EB !important;
+        border-color: rgba(255, 255, 255, 0.3) !important;
+        transform: translateY(-2px) !important;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1) !important;
     }
     
     /* Sidebar styling */
@@ -253,10 +497,34 @@ st.markdown("""
         margin-bottom: 1rem;
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         transition: transform 0.2s;
+        height: 100%;
+        min-height: 200px;
     }
     
-    .organ-card:hover {
-        transform: translateY(-2px);
+    .organ-card h3 {
+        color: #2D3748;
+        margin-bottom: 1rem;
+        font-size: 1.2rem;
+        font-weight: bold;
+    }
+    
+    .organ-card ul {
+        list-style-type: none;
+        padding-left: 0;
+        margin-top: 1rem;
+    }
+    
+    .organ-card ul li {
+        margin-bottom: 0.5rem;
+        padding-left: 1.5rem;
+        position: relative;
+    }
+    
+    .organ-card ul li:before {
+        content: "•";
+        position: absolute;
+        left: 0;
+        color: #EF4444;
     }
     
     .status-healthy {
@@ -271,9 +539,28 @@ st.markdown("""
     
     .dashboard-header {
         color: #FFFFFF !important;
-        text-align: center;
-        margin-bottom: 2rem;
+        text-align: left;
+        margin-bottom: 1rem;
         text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+    }
+    
+    /* Start New Assessment button styling */
+    .stButton > button {
+        background-color: #3B82F6 !important;
+        color: white !important;
+        border: 1px solid rgba(255, 255, 255, 0.2) !important;
+        padding: 0.75rem 1rem !important;
+        font-size: 1rem !important;
+        border-radius: 8px !important;
+        transition: all 0.3s ease !important;
+        margin-top: 1rem !important;
+    }
+    
+    .stButton > button:hover {
+        background-color: #2563EB !important;
+        border-color: rgba(255, 255, 255, 0.3) !important;
+        transform: translateY(-2px) !important;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1) !important;
     }
     
     /* Organ selection styles */
@@ -313,22 +600,6 @@ st.markdown("""
         margin: 0;
     }
     
-    /* Back to Dashboard button */
-    .back-button {
-        background-color: #4A5568;
-        color: white;
-        padding: 0.75rem 1.5rem;
-        border-radius: 8px;
-        border: none;
-        font-weight: bold;
-        transition: all 0.3s ease;
-    }
-    
-    .back-button:hover {
-        background-color: #2D3748;
-        transform: translateY(-2px);
-    }
-    
     /* Tab styling */
     .stTabs [data-baseweb="tab-list"] {
         background-color: rgba(0, 0, 0, 0.5);
@@ -352,12 +623,195 @@ st.markdown("""
         text-align: center;
         text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
         margin-bottom: 2rem;
+        margin-top: 1rem !important;
     }
     
     /* Input label styling */
     .stTextInput label {
         color: #FFFFFF !important;
         text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+    }
+    
+    .health-chain {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+        margin: 10px 0;
+        background: rgba(0, 0, 0, 0.3);
+        padding: 15px;
+        border-radius: 20px;
+        justify-content: flex-start;
+        overflow-x: auto;
+        min-height: 50px;
+    }
+    
+    .health-day {
+        width: 35px;
+        height: 35px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        color: white;
+        font-weight: bold;
+        border: 2px solid rgba(255, 255, 255, 0.2);
+        flex-shrink: 0;
+    }
+    
+    .health-green {
+        background-color: #28a745;
+    }
+    
+    .health-yellow {
+        background-color: #ffc107;
+    }
+    
+    .health-red {
+        background-color: #dc3545;
+    }
+    
+    .health-inactive {
+        background-color: rgba(255, 255, 255, 0.1);
+        color: rgba(255, 255, 255, 0.5);
+        border: 2px dashed rgba(255, 255, 255, 0.2);
+    }
+    
+    .health-day.current {
+        border: 2px solid white;
+        box-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+    }
+    
+    /* Active Alerts styling */
+    .organ-notes {
+        color: #4A5568;
+        margin-bottom: 1rem;
+        font-size: 1rem;
+        line-height: 1.5;
+    }
+    
+    .alert-list {
+        list-style-type: none;
+        padding-left: 0;
+        margin: 0;
+    }
+    
+    .alert-item {
+        color: #EF4444;
+        margin-bottom: 0.5rem;
+        padding-left: 1.5rem;
+        position: relative;
+        font-weight: 500;
+    }
+    
+    .alert-item:before {
+        content: "⚠️";
+        position: absolute;
+        left: 0;
+        font-size: 1rem;
+    }
+    
+    .no-alerts {
+        color: #10B981;
+        font-style: italic;
+        text-align: center;
+        margin: 1rem 0;
+    }
+    
+    /* Navigation buttons container */
+    div[data-testid="column"]:nth-child(3) {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
+    /* Navigation buttons */
+    div[data-testid="column"] button {
+        margin-bottom: 0.5rem !important;
+    }
+    
+    /* Finish Assessment button */
+    div[data-testid="column"]:nth-child(3) button[kind="primary"] {
+        background-color: #10B981 !important;
+        color: white !important;
+        border: 1px solid rgba(255, 255, 255, 0.2) !important;
+        padding: 0.5rem 1rem !important;
+        width: 100% !important;
+        border-radius: 8px !important;
+        backdrop-filter: blur(5px) !important;
+        transition: all 0.3s ease !important;
+        font-size: 0.9rem !important;
+        margin-top: 0.5rem !important;
+    }
+    
+    div[data-testid="column"]:nth-child(3) button[kind="primary"]:hover {
+        background-color: #059669 !important;
+        border-color: rgba(255, 255, 255, 0.3) !important;
+        transform: translateY(-2px) !important;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1) !important;
+    }
+    
+    /* Save Dialog */
+    .save-dialog {
+        background: rgba(0, 0, 0, 0.8);
+        border-radius: 12px;
+        padding: 2rem;
+        margin: 1rem 0;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        text-align: center;
+        color: white;
+    }
+    
+    .save-dialog h3 {
+        color: white;
+        margin-bottom: 1rem;
+        font-size: 1.2rem;
+    }
+    
+    .save-dialog p {
+        color: rgba(255, 255, 255, 0.8);
+        margin-bottom: 1.5rem;
+    }
+    
+    /* Save Dialog Buttons */
+    .save-dialog button {
+        min-width: 120px;
+    }
+    
+    /* Save & Exit Button */
+    .element-container:has(button:contains("Save & Exit")) button {
+        background-color: #10B981 !important;
+    }
+    
+    .element-container:has(button:contains("Save & Exit")) button:hover {
+        background-color: #059669 !important;
+    }
+    
+    /* Exit without Saving Button */
+    .element-container:has(button:contains("Exit without Saving")) button {
+        background-color: #EF4444 !important;
+    }
+    
+    .element-container:has(button:contains("Exit without Saving")) button:hover {
+        background-color: #DC2626 !important;
+    }
+    
+    /* Cancel Button */
+    .element-container:has(button:contains("Cancel")) button {
+        background-color: #6B7280 !important;
+    }
+    
+    .element-container:has(button:contains("Cancel")) button:hover {
+        background-color: #4B5563 !important;
+    }
+    
+    /* Button text nowrap */
+    div[data-testid="column"] button {
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        min-width: fit-content !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -389,10 +843,7 @@ if "health_records" not in st.session_state:
             "status": "unhealthy",
             "notes": "Slight inflammation detected, elevated enzyme levels",
             "recommendations": [
-                "Schedule follow-up in 2 weeks",
                 "Monitor liver function tests",
-                "Maintain low-fat diet",
-                "Avoid alcohol consumption"
             ],
             "alerts": ["Elevated ALT levels", "Mild fatty changes"]
         },
@@ -466,15 +917,26 @@ if "health_records" not in st.session_state:
 
 # Welcome Page
 if st.session_state.current_stage == "welcome":
+    # Navigation buttons container
+    col1, col2, col3 = st.columns([6, 1, 1])
+    with col2:
+        if st.button("🏠 Home", key="home_welcome"):
+            st.session_state.current_stage = "welcome"
+            st.rerun()
+    with col3:
+        if st.button("👤 Profile", key="profile_welcome"):
+            st.session_state.current_stage = "login"
+            st.rerun()
+    
     st.markdown('<div class="welcome-container">', unsafe_allow_html=True)
     
     # Text content with background
     st.markdown("""
         <div class="text-background">
-            <h1 class="welcome-header">Welcome Astronaut</h1>
+            <h1 class="welcome-header">Welcome Astronaut!</h1>
             <div class="welcome-message">
                 Welcome to Space Triage, your AI-powered medical assistant for space missions.
-                Let's begin your medical assessment journey.
+                <br>Let's begin your medical assessment journey!
             </div>
         </div>
     """, unsafe_allow_html=True)
@@ -488,6 +950,17 @@ if st.session_state.current_stage == "welcome":
 
 # Login Page
 elif st.session_state.current_stage == "login":
+    # Navigation buttons container
+    col1, col2, col3 = st.columns([6, 1, 1])
+    with col2:
+        if st.button("🏠 Home", key="home_login"):
+            st.session_state.current_stage = "welcome"
+            st.rerun()
+    with col3:
+        if st.button("👤 Profile", key="profile_login"):
+            st.session_state.current_stage = "login"
+            st.rerun()
+    
     st.markdown('<div class="welcome-container">', unsafe_allow_html=True)
     
     # Text content with background
@@ -518,11 +991,28 @@ elif st.session_state.current_stage == "login":
 elif st.session_state.current_stage == "dashboard":
     st.markdown('<div class="dashboard-container">', unsafe_allow_html=True)
     
-    # Dashboard Header
-    st.markdown(f"""
-        <h1 class="dashboard-header">Health Records Dashboard</h1>
-        <h2 class="dashboard-header">Welcome, {st.session_state.astronaut_name}</h2>
-    """, unsafe_allow_html=True)
+    # Navigation buttons container
+    col1, col2, col3 = st.columns([6, 1, 1])
+    with col2:
+        if st.button("🏠 Home", key="home_dashboard"):
+            st.session_state.current_stage = "welcome"
+            st.rerun()
+    with col3:
+        if st.button("👤 Profile", key="profile_dashboard"):
+            st.session_state.current_stage = "login"
+            st.rerun()
+    
+    # Dashboard Header with Start New Assessment button
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.markdown(f"""
+            <h1 class="dashboard-header">Health Records Dashboard</h1>
+            <h2 class="dashboard-header">Welcome, {st.session_state.astronaut_name}</h2>
+        """, unsafe_allow_html=True)
+    with col2:
+        if st.button("Start New Assessment", key="new_assessment", use_container_width=True):
+            st.session_state.current_stage = "select_organ"
+            st.rerun()
     
     # Create tabs for each organ
     tabs = st.tabs([organ.capitalize() for organ in st.session_state.health_records.keys()])
@@ -530,51 +1020,48 @@ elif st.session_state.current_stage == "dashboard":
     # Display detailed information for each organ in its respective tab
     for tab, (organ, data) in zip(tabs, st.session_state.health_records.items()):
         with tab:
-            # Create three columns for the sub-dashboard
-            col1, col2, col3 = st.columns([1, 2, 1])
+            # Health History Chain first
+            display_health_history(organ.capitalize())
+            
+            # Create three columns for the main boxes
+            col1, col2, col3 = st.columns([1, 1, 1])
             
             with col1:
-                # Status Card
+                # Status Overview Card
                 st.markdown(f"""
                     <div class="organ-card">
-                        <h3 style="text-transform: capitalize;">Status Overview</h3>
+                        <h3>Status Overview</h3>
                         <p><strong>Latest Check:</strong> {data['latest_date']}</p>
                         <p><strong>Status:</strong> 
                             <span class="status-{data['status']}">
                                 {data['status'].upper()}
                             </span>
                         </p>
-                        <p><strong>Notes:</strong> {data['notes']}</p>
-                    </div>
-                """, unsafe_allow_html=True)
-                
-                # Quick Actions
-                st.markdown("""
-                    <div class="organ-card">
-                        <h3>Quick Actions</h3>
-                        <button class="stButton">Schedule New Check</button>
-                        <button class="stButton">View History</button>
-                        <button class="stButton">Download Report</button>
                     </div>
                 """, unsafe_allow_html=True)
             
             with col2:
-                # Detailed Information
-                st.markdown(f"""
+                # Active Alerts
+                alerts_html = """
                     <div class="organ-card">
-                        <h3>Detailed Information</h3>
-                        <p><strong>Last Assessment:</strong> Complete evaluation on {data['latest_date']}</p>
-                        <p><strong>Next Recommended Check:</strong> {data['latest_date']}</p>
-                    </div>
-                """, unsafe_allow_html=True)
+                        <h3>⚠️ Active Alerts</h3>
+                """
                 
-                # Historical Data (placeholder)
-                st.markdown("""
-                    <div class="organ-card">
-                        <h3>Historical Data</h3>
-                        <p>No historical data available</p>
-                    </div>
-                """, unsafe_allow_html=True)
+                # Add notes if they exist
+                if data['notes']:
+                    alerts_html += f'<p class="organ-notes">{data["notes"]}</p>'
+                
+                # Add alerts if they exist
+                if data['alerts']:
+                    alerts_html += '<ul class="alert-list">'
+                    for alert in data['alerts']:
+                        alerts_html += f'<li class="alert-item">{alert}</li>'
+                    alerts_html += '</ul>'
+                elif not data['notes']:  # If no alerts and no notes
+                    alerts_html += '<p class="no-alerts">No active alerts</p>'
+                
+                alerts_html += "</div>"
+                st.markdown(alerts_html, unsafe_allow_html=True)
             
             with col3:
                 # Recommendations
@@ -591,32 +1078,27 @@ elif st.session_state.current_stage == "dashboard":
                     </div>
                 """
                 st.markdown(recommendations_html, unsafe_allow_html=True)
-                
-                # Alerts/Notifications
-                alerts_html = """
-                    <div class="organ-card">
-                        <h3>Alerts</h3>
-                """
-                if data.get('alerts'):
-                    alerts_html += "<ul>"
-                    for alert in data['alerts']:
-                        alerts_html += f'<li class="status-unhealthy">{alert}</li>'
-                    alerts_html += "</ul>"
-                else:
-                    alerts_html += "<p>No active alerts</p>"
-                alerts_html += "</div>"
-                st.markdown(alerts_html, unsafe_allow_html=True)
-    
-    # Add a button to start new assessment
-    if st.button("Start New Assessment", key="new_assessment"):
-        st.session_state.current_stage = "select_organ"  # Changed from "initial" to "select_organ"
-        st.rerun()
     
     st.markdown('</div>', unsafe_allow_html=True)
 
 # Organ Selection Page
 elif st.session_state.current_stage == "select_organ":
     st.markdown('<div class="dashboard-container">', unsafe_allow_html=True)
+    
+    # Top navigation row with Back to Dashboard, Home, and Profile buttons
+    col1, col2, col3, col4 = st.columns([2, 4, 1, 1])
+    with col1:
+        if st.button("← Back to Dashboard", key="back_to_dashboard"):
+            st.session_state.current_stage = "dashboard"
+            st.rerun()
+    with col3:
+        if st.button("🏠 Home", key="home_select"):
+            st.session_state.current_stage = "welcome"
+            st.rerun()
+    with col4:
+        if st.button("👤 Profile", key="profile_select"):
+            st.session_state.current_stage = "login"
+            st.rerun()
     
     # Header
     st.markdown(f"""
@@ -683,20 +1165,55 @@ elif st.session_state.current_stage == "select_organ":
                 st.session_state.current_stage = "initial"
                 st.rerun()
     
-    # Back to Dashboard button
-    st.markdown("""
-        <div style="text-align: center; margin-top: 2rem;">
-            <button class="back-button">Back to Dashboard</button>
-        </div>
-    """, unsafe_allow_html=True)
-    if st.button("Back to Dashboard", key="back_to_dashboard"):
-        st.session_state.current_stage = "dashboard"
-        st.rerun()
-    
     st.markdown('</div>', unsafe_allow_html=True)
 
 # Main Application (only show if not on welcome or login page)
 elif st.session_state.current_stage not in ["welcome", "login"]:
+    # Top navigation row with Finish Assessment button
+    col1, col2, col3, col4 = st.columns([2, 4, 1, 1])
+    with col1:
+        if st.button("← Change Organ", key="change_organ_main"):
+            st.session_state.current_stage = "select_organ"
+            st.rerun()
+    with col3:
+        if st.button("🏠 Home", key="home_main"):
+            st.session_state.current_stage = "welcome"
+            st.rerun()
+    with col4:
+        if st.button("👤 Profile", key="profile_main"):
+            st.session_state.current_stage = "login"
+            st.rerun()
+        if st.button("✓ Finish", key="finish_assessment", type="primary"):
+            st.session_state.show_save_dialog = True
+            st.rerun()
+
+    # Save/Exit Dialog
+    if "show_save_dialog" in st.session_state and st.session_state.show_save_dialog:
+        with st.container():
+            st.markdown("""
+                <div class='save-dialog'>
+                    <h3>Save Assessment?</h3>
+                    <p>Do you want to save your assessment before exiting?</p>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            col1, col2, col3 = st.columns([1, 1, 1])
+            with col1:
+                if st.button("Save & Exit", key="save_and_exit"):
+                    # Here you would implement the save logic
+                    st.session_state.show_save_dialog = False
+                    st.session_state.current_stage = "dashboard"
+                    st.rerun()
+            with col2:
+                if st.button("Exit without Saving", key="exit_without_save"):
+                    st.session_state.show_save_dialog = False
+                    st.session_state.current_stage = "dashboard"
+                    st.rerun()
+            with col3:
+                if st.button("Cancel", key="cancel_exit"):
+                    st.session_state.show_save_dialog = False
+                    st.rerun()
+    
     # Main title with white color
     st.markdown('<h1 class="main-title">Space Triage: AI-Guided Ultrasound</h1>', unsafe_allow_html=True)
     
@@ -705,12 +1222,9 @@ elif st.session_state.current_stage not in ["welcome", "login"]:
         st.title("🚀 Space Triage")
         st.subheader(f"Welcome, {st.session_state.astronaut_name}")
         
-        # Display the selected organ instead of requiring input
+        # Display the selected organ
         if st.session_state.selected_organ:
             st.markdown(f"### Target Organ: {st.session_state.selected_organ.capitalize()}")
-            if st.button("Change Organ", key="change_organ"):
-                st.session_state.current_stage = "select_organ"
-                st.rerun()
         else:
             st.markdown("### No organ selected")
             if st.button("Select Organ", key="select_organ_button"):
@@ -728,7 +1242,6 @@ elif st.session_state.current_stage not in ["welcome", "login"]:
         # Reset button
         if st.button("🔄 Start New Session"):
             restart_session()
-
 
     # Display chat messages
     for message in st.session_state.messages:
