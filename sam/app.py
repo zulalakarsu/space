@@ -8,12 +8,12 @@ from typing import Optional
 import io
 from PIL import Image
 import os
-from openai import OpenAI
+from anthropic import Anthropic
 from src.prompts import get_navigation_prompt, get_ultrasound_diagnostic_prompt
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
 
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
+claude_client = Anthropic(api_key=CLAUDE_API_KEY)
 
 app = FastAPI(title="Image and Text Processing API")
 
@@ -48,7 +48,7 @@ def decode_image(base64_string):
 # Helper function for image identification logic
 def identify_entity_in_image(image, entity_name):
     """
-    Identify if the specified entity is present in the image using OpenAI's API.
+    Identify if the specified entity is present in the image using Claude's API.
     """
     # Convert OpenCV image to base64 for API request
     if isinstance(image, np.ndarray):
@@ -63,32 +63,32 @@ def identify_entity_in_image(image, entity_name):
     image_pil.save(buffer, format="JPEG")
     base64_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
     
-    # Using GPT-4 Vision API for identification
-    payload = {
-        "model": "gpt-4o",  # or the latest vision model
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"Is there a {entity_name} in this image? Please respond with only 'true' or 'false'."
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64_image}"
-                        }
-                    }
-                ]
-            }
-        ],
-        "max_tokens": 10  # Keep response concise
-    }
-
+    # Using Claude Vision API for identification
     try:
-        response = openai_client.chat.completions.create(**payload)
-        response_text = response.choices[0].message.content
+        response = claude_client.messages.create(
+            model="claude-3-sonnet-20240229",
+            max_tokens=10,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Is there a {entity_name} in this image? Please respond with only 'true' or 'false'."
+                        },
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/jpeg",
+                                "data": base64_image
+                            }
+                        }
+                    ]
+                }
+            ]
+        )
+        response_text = response.content[0].text
         
         # Determine if the entity was found based on the response
         if "true" in response_text.lower():
@@ -101,14 +101,14 @@ def identify_entity_in_image(image, entity_name):
             
     except Exception as e:
         # Log the error (in a production environment)
-        print(f"Error in OpenAI API call: {str(e)}")
+        print(f"Error in Claude API call: {str(e)}")
         # Default to False on error
         return False
 
 # Helper function for image description
 def generate_description(image):
     """
-    Generate a detailed description of the image content using OpenAI's API.
+    Generate a detailed description of the image content using Claude's API.
     """
     # Convert OpenCV image to base64 for API request
     if isinstance(image, np.ndarray):
@@ -123,37 +123,37 @@ def generate_description(image):
     image_pil.save(buffer, format="JPEG")
     base64_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
     
-    # Using GPT-4 Vision API for image description
-    payload = {
-        "model": "gpt-4o",  # or the latest vision model
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": get_ultrasound_diagnostic_prompt()
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64_image}"
-                        }
-                    }
-                ]
-            }
-        ],
-        "max_tokens": 4096  # Adjust based on desired description length
-    }
-    
+    # Using Claude Vision API for image description
     try:
-        response = openai_client.chat.completions.create(**payload)
-        description = response.choices[0].message.content
+        response = claude_client.messages.create(
+            model="claude-3-sonnet-20240229",
+            max_tokens=4096,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": get_ultrasound_diagnostic_prompt()
+                        },
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/jpeg",
+                                "data": base64_image
+                            }
+                        }
+                    ]
+                }
+            ]
+        )
+        description = response.content[0].text
         return description
             
     except Exception as e:
         # Log the error (in a production environment)
-        print(f"Error in OpenAI API call: {str(e)}")
+        print(f"Error in Claude API call: {str(e)}")
         
         # Fallback to basic description on error
         width, height = image_pil.size
@@ -251,7 +251,7 @@ async def navigate(entity_name: str = Form(...), image: UploadFile = File(...)):
         
         # This would typically connect to a navigation service or NLP model
         payload = {
-            "model": "gpt-4o",  # or the latest vision model
+            "model": "claude-3-7-sonnet-20250219",  # or the latest vision model
             "messages": [
                 {
                     "role": "user",
@@ -272,9 +272,9 @@ async def navigate(entity_name: str = Form(...), image: UploadFile = File(...)):
             "max_tokens": 4096  # Adjust based on desired description length
         }
         
-        response = openai_client.chat.completions.create(**payload)
+        response = claude_client.messages.create(**payload)
         
-        return {"response": response.choices[0].message.content}
+        return {"response": response.content[0].text}
     
     except Exception as e:
         print(f"Error in navigate endpoint: {str(e)}")
@@ -311,7 +311,7 @@ async def describe_image(target_organ: str = Form(...), image: UploadFile = File
         
         # This would typically connect to a navigation service or NLP model
         payload = {
-            "model": "gpt-4o",  # or the latest vision model
+            "model": "claude-3-7-sonnet-20250219",  # or the latest vision model
             "messages": [
                 {
                     "role": "user",
@@ -332,10 +332,10 @@ async def describe_image(target_organ: str = Form(...), image: UploadFile = File
             "max_tokens": 4096  # Adjust based on desired description length
         }
         
-        response = openai_client.chat.completions.create(**payload)
-        print(response.choices[0].message.content)
+        response = claude_client.messages.create(**payload)
+        print(response.content[0].text)
         
-        return {"description": response.choices[0].message.content}
+        return {"description": response.content[0].text}
     
     except Exception as e:
         print(f"Error in describe endpoint: {str(e)}")
